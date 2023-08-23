@@ -614,6 +614,35 @@ function gen_ortho_bases(xdata::Vector{T}, nmax::Int, bf=Polynomial()) where T
 end
 
 
+function gen_ortho_bases(xdata::Vector{T}, Sigma::Matrix{T}, bf=Polynomial()) where T
+    
+    
+    ndata = length(xdata)
+    nmax  = size(Sigma, 1) - 1;
+    library_matrix = zeros(T, ndata, size(Sigma, 1))
+    u_this = zeros(T, ndata)
+    u_before = zeros(T, ndata)
+    c_this = zeros(T, nmax+1)
+    
+    library_matrix[:,1] .= one(T)
+    (nmax==0) && (return library_matrix[:,1])
+    
+    for n in 1:nmax
+        
+        u_this .= Sigma[n+1, n+1] .* bf.(n, xdata);
+        
+        for m = 0:(n-1)
+            copy!(u_before, @view(library_matrix[:,m+1]))
+            u_this .-= Sigma[n+1, m+1] .* u_before
+        end
+        
+        copy!(@view(library_matrix[:,n+1]), u_this)
+    end
+    
+    return library_matrix
+end
+
+
 
 function rec_ortho_bases(xdata::Vector{T}, Sigma::Matrix{T}, coeffs::Vector{T}, bf=Polynomial()) where T
     
