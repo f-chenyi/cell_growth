@@ -38,6 +38,25 @@ function _logLikelihood_L2(Theta::Matrix{T}, ThetaDiv::Vector{T}, coeffs::Vector
 end
 
 
+function _fitting_error(Theta::Matrix{T}, ThetaDiv::Vector{T}, coeffs::Vector{T}, dts::Vector{T}) where T
+    
+    _logL = -mydot(coeffs, ThetaDiv)
+    
+    for i in axes(Theta, 1)
+        sdiv = zero(T)
+        for k in 1:length(coeffs)
+            sdiv += coeffs[k] * Theta[i,k]
+        end
+        _logL += exp(sdiv) * dts[i]
+    end
+
+    _logL /= sum(dts)
+
+    return _logL
+
+end
+
+
 
 function sparse_optimization(Theta::Matrix{T}, ThetaDiv::Vector{T}, dts::Vector{T};
                              coeffs0 = ones(size(Theta,2)), gamma0 = ones(size(Theta,2)), MAX_ITERS=100, EPSILON=1E-7, PRINT=true
@@ -130,5 +149,74 @@ function sparse_bayesian_optimization(Phi::Matrix{Float64}, Y::Vector{Float64};
     end
     
     return  1/2*log(lambda), mu
+
+end
+
+
+function sparse_optimization_sweep(Theta::Matrix{T}, ThetaDiv::Vector{T}, dts::Vector{T};
+    annealing_rate::Int=1, init_cutoff=0.01, opt_args...
+) where T
+
+    history = Dict(
+        :error => Vector{Float64}(undef, 0),
+        :nterms => Vector{Int64}(undef,0),
+        :cutoff => Vector{Float64}(undef,0),
+        :coeffs => Vector{Vector{Float64}}(undef,0),
+    )
+
+    cutoff = init_cutoff
+    bigind = trues(size(Theta,2))
+
+    count = 0
+
+    while true
+        
+        coeffs_n  = zeros(size(Theta,2)) 
+        coeffs_o = zeros(size(Theta,2))
+        count += 1
+
+        println("===== start of epoch $count =====")
+
+        while true 
+            
+            Theta_tmp = Theta[:, bigind]
+            ThetaDiv_tmp = ThetaDiv[bigind]
+            _, coeffs_tmp = sparse_optimization(Theta_tmp, ThetaDiv_tmp, dts; opt_args...)
+
+            # cut coefficients
+            copy!(@view(coeffs_n[bigind]), coeffs_tmp)
+            coeffs_n[abs.(coeffs_n) .<= cutoff] .= 0
+            bigind .= ( abs.(coeffs_n) .> cutoff )
+            
+            if maximum(abs.(coeffs_n .- coeffs_o)) < 1e-6
+                break
+            else
+                copy!(coeffs_o, coeffs_n)
+            end 
+
+        end
+
+        nn = sum(bigind);
+        err = _fitting_error(Theta, ThetaDiv, coeffs_n, dts)
+
+        # save
+        history[:error] = vcat(history[:error], err)
+        history[:nterms]= vcat(history[:nterms], nn)
+        history[:cutoff]= vcat(history[:cutoff], cutoff)
+        push!(history[:coeffs], coeffs_n)
+
+        println("===== end of epoch $count =====")
+        println("error = $err, nterms = $nn, cutoff = $cutoff")
+
+        # update cutoff
+        if nn == 0
+            break;
+        else
+            (nn < annealing_rate) ? (cutoff = maximum(abs.(coeffs_n[bigind]))+1e-6) : (cutoff=partialsort!(abs.(coeffs_n[bigind]),annealing_rate)+1e-6);
+        end
+
+    end
+
+    return history
 
 end
