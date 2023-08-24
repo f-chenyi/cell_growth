@@ -43,3 +43,16 @@ function annotate_exp_traj(Lt::Vector{Float64}, tt::Vector{Float64}; cutoff=0.75
     end
     return isdiv, dts 
 end
+
+
+function compute_ldiv_cov(lobs::Vector{Vector{Float64}}, isdiv::Vector{BitVector}, n::Int)
+    x = vcat( [lobs[i][isdiv[i]][1:end-n] for i in eachindex(lobs) ]...)
+    y = vcat( [lobs[i][isdiv[i]][1+n:end] for i in eachindex(lobs) ]...)
+    return mean(x.*y) - mean(x) * mean(y)
+end
+
+function compute_ldiv_cov(lobs::Vector{Float64}, isdiv::BitVector, n::Int)
+    x = lobs[isdiv][1:end-n]
+    y = lobs[isdiv][1+n:end]
+    return mean(x.*y) - mean(x) * mean(y)
+end
