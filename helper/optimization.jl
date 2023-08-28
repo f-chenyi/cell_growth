@@ -40,7 +40,7 @@ end
 
 
 function sparse_optimization(Theta::Matrix{T}, ThetaDiv::Vector{T}, dts::Vector{T};
-                             coeffs0 = ones(size(Theta,2)), gamma0 = ones(size(Theta,2)), MAX_ITERS=100, EPSILON=1E-7, PRINT=true
+                            coeffs0 = ones(size(Theta,2)), gamma0 = ones(size(Theta,2)), MAX_ITERS=100, EPSILON=1E-7, PRINT=true
     ) where T
     
     coeffs_o = copy(coeffs0)
@@ -77,7 +77,7 @@ end
 
 
 function sparse_bayesian_optimization(Phi::Matrix{Float64}, Y::Vector{Float64}; 
-             MAX_ITERS=100, EPSILON=1e-6, lambda=1.0, gamma=0.5*ones(size(Phi,2)))
+            MAX_ITERS=100, EPSILON=1e-6, lambda=1.0, gamma=0.5*ones(size(Phi,2)))
 
     # fitting Y = Phi * mu + GaussianNoise(lambda)
     
@@ -199,13 +199,13 @@ end
 function sparse_optimization_L1(Theta::Matrix{T}, ThetaDiv::Vector{T}, dts::Vector{T};
     coeffs0 = ones(size(Theta,2)), lam = 1.0) where T
 
-coeffs_o = copy(coeffs0)
+    coeffs_o = copy(coeffs0)
 
-res = optimize( x-> _logLikelihood_L1(Theta, ThetaDiv, x, dts, lam),
-coeffs_o, NelderMead() , Optim.Options(show_trace=false,iterations = 10_000); autodiff=:finite
-)
-copy!(coeffs_o, res.minimizer)
+    res = optimize( x-> _logLikelihood_L1(Theta, ThetaDiv, x, dts, lam),
+    coeffs_o, NelderMead() , Optim.Options(show_trace=false,iterations = 10_000); autodiff=:finite
+    )
+    copy!(coeffs_o, res.minimizer)
 
-return res.minimum, coeffs_o
+    return res.minimum, coeffs_o
 
 end
