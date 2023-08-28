@@ -19,6 +19,7 @@ end
 
 
 function learn_sparse(Theta, dxdt, threshold; dim = 1)
+# This function use least square approximation
 # dxdt = Theta * Xi
 # Input:
 # Theta: each column represents a candidate function
@@ -40,3 +41,37 @@ function learn_sparse(Theta, dxdt, threshold; dim = 1)
     end
     return Xi
 end
+
+function least_square_L0_penalty(Theta, y, x, l)
+    res = y - Theta * x
+    return sum(res.^2) + l * abs.(x)
+end
+
+function learn_sparse_penalty(Theta, dxdt, threshold; dim = 1, lambda = 0.1, coeff_0 = ones(size(Theta,2)))
+    # This function has added a penalty term
+    # dxdt = Theta * Xi
+    # Input:
+    # Theta: each column represents a candidate function
+    # dxdt: derivative of X, obtained by differentiation
+    # threshold: threshold to exclude the big coefficients
+    # n: the dimension of the input data
+    # lambda: penalized terms
+    # 
+    # Output:
+    # Xi: The coefficients of library terms
+    
+        res = optimize( x-> least_square_L0_penalty(Theta, dxdt, x, lambda),
+        coeff_0, NelderMead() , Optim.Options(show_trace=false,iterations = 10_000); autodiff=:finite)
+        Xi = res.minimizer
+        for k = 1:10
+            smallinds = abs.(Xi) .< threshold
+            Xi[smallinds] .= 0
+            for ind = 1:dim
+                biginds = findall(!iszero, Xi[:, ind])
+                res = optimize( x-> least_square_L0_penalty(Theta[:, biginds], dxdt[:, ind], x, lambda),
+        coeff_0[biginds], NelderMead() , Optim.Options(show_trace=false,iterations = 10_000); autodiff=:finite)
+            Xi[biginds, ind] = res.minimizer
+            end
+        end
+        return Xi
+    end
