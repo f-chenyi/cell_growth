@@ -42,12 +42,15 @@ function learn_sparse(Theta, dxdt, threshold; dim = 1)
     return Xi
 end
 
-function least_square_L0_penalty(Theta, y, x, l)
+function least_square_L1_penalty(Theta, y, x, l)
     res = y - Theta * x
     return sum(res.^2) + l * abs.(x)
 end
 
-function learn_sparse_penalty(Theta, dxdt, threshold; dim = 1, lambda = 0.1, coeff_0 = ones(size(Theta,2)))
+function learn_sparse_penalty(Theta, dxdt, threshold; 
+    dim = 1, lambda = 0.1, coeff_0 = ones(size(Theta,2)),
+    optim_options=Optim.Options(show_trace=false,iterations = 10_000) 
+    )
     # This function has added a penalty term
     # dxdt = Theta * Xi
     # Input:
@@ -60,16 +63,16 @@ function learn_sparse_penalty(Theta, dxdt, threshold; dim = 1, lambda = 0.1, coe
     # Output:
     # Xi: The coefficients of library terms
     
-        res = optimize( x-> least_square_L0_penalty(Theta, dxdt, x, lambda),
-        coeff_0, NelderMead() , Optim.Options(show_trace=false,iterations = 10_000); autodiff=:finite)
+        res = optimize( x-> least_square_L1_penalty(Theta, dxdt, x, lambda),
+                        coeff_0, NelderMead() , optim_options; autodiff=:finite)
         Xi = res.minimizer
         for k = 1:10
             smallinds = abs.(Xi) .< threshold
             Xi[smallinds] .= 0
             for ind = 1:dim
                 biginds = findall(!iszero, Xi[:, ind])
-                res = optimize( x-> least_square_L0_penalty(Theta[:, biginds], dxdt[:, ind], x, lambda),
-        coeff_0[biginds], NelderMead() , Optim.Options(show_trace=false,iterations = 10_000); autodiff=:finite)
+                res = optimize( x-> least_square_L1_penalty(Theta[:, biginds], dxdt[:, ind], x, lambda),
+                                coeff_0[biginds], NelderMead() , optim_options; autodiff=:finite)
             Xi[biginds, ind] = res.minimizer
             end
         end
