@@ -224,44 +224,6 @@ end
 
 
 
-function sparse_optimization_multisparsity(Theta::Matrix{T}, ThetaDiv::Vector{T}, dts::Vector{T};
-    coeffs0 = ones(size(Theta,2)), gamma0 = ones(size(Theta,2)), MAX_ITERS=100, EPSILON=1E-7, PRINT=true, COEFF_TRESHOLD = 0.01
-) where T
-    coeff_return =[]
-    num_relevant_return = []
-    num_relevant = size(Theta,2)
-
-    _, coeffs_new = sparse_optimization(Theta, ThetaDiv, dts; EPSILON=1E-7, MAX_ITERS=40);
-
-    coeffs = copy(coeffs_new)
-    smallinds = findall(abs.(coeffs) .< COEFF_TRESHOLD)
-    biginds = [i for i in 1:length(coeffs) if !(i in smallinds)]
-    coeffs[abs.(coeffs) .< COEFF_TRESHOLD] .= 0.0
-    coeff_return = vcat(coeff_return, [coeffs])
-    mini_new = minimum(abs.(coeffs[biginds]))
-    num_relevant_return = vcat(num_relevant_return, [length(biginds)])
-
-    while num_relevant > length(biginds)
-        num_relevant = length(biginds)
-        _, coeffs_new[biginds] = sparse_optimization(Theta[:,biginds], ThetaDiv[biginds], dts; EPSILON=1E-7, MAX_ITERS=40);
-        
-        coeffs = copy(coeffs_new)
-        smallinds = vcat(findall((abs.((abs.(coeffs) .- mini_new)) .<COEFF_TRESHOLD)), smallinds)
-        biginds = [i for i in 1:length(coeffs) if !(i in smallinds)]
-        coeffs[smallinds] .= 0.0
-        coeff_return = vcat(coeff_return, [coeffs])
-        mini_new = minimum(abs.(coeffs[biginds]))
-        num_relevant_return = vcat(num_relevant_return, [length(biginds)])
-        # make sure we do not exclude all coeffs
-        (length(biginds) == 0) && (break)
-    end
-
-
-    return coeff_return, num_relevant_return
-
-end
-
-
 function _logLikelihood_L1(Theta::Matrix{T}, ThetaDiv::Vector{T}, coeffs::Vector{T}, dts::Vector{T}, lam::T) where T
     
     @assert size(Theta,2) == length(coeffs)
