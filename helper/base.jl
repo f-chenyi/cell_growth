@@ -691,3 +691,300 @@ function gen_bases(xdata::Vector{T}, nmax::Int, bf=Polynomial()) where T
     return library_matrix
     
 end
+
+
+function mydot_ele!(v0, v1, v2)
+    @assert length(v1) == length(v2)
+    @inbounds@fastmath for i in eachindex(v1)
+        v0[i] = v1[i] * v2[i]
+    end
+    nothing
+end
+
+
+
+function gen_ortho_bases(xdata1::Vector{T}, xdata2::Vector{T}, nmax1::Int, nmax2::Int, bf1=Polynomial(), bf2=Polynomial() ) where T
+    
+    # 1 - current length
+    # 2 - length at last division
+
+    ndata = length(xdata1)
+    ( length(xdata2) != ndata ) && (error("DimensionError: input xdata1 and xdata2 must have the same length")) 
+    
+    Θ1 , Σ1 = gen_ortho_bases(xdata1, nmax1, bf1)
+    Θ2 , Σ2 = gen_ortho_bases(xdata2, nmax2, bf2)
+    
+    library_matrix = zeros( T, ndata, size(Θ1, 2) * size(Θ2, 2) )
+    col_to_indices = findall( ones(size(Θ1, 2), size(Θ2, 2)) .> 0)
+    
+    for col in axes(library_matrix, 2)
+        n1 = col_to_indices[col][1]
+        n2 = col_to_indices[col][2]
+        mydot_ele!( @view(library_matrix[:, col]),
+                    @view( Θ1[:, n1] ), @view(Θ2[:, n2])
+            )
+    end
+    
+    return library_matrix, Σ1, Σ2
+
+end
+
+
+
+function rec_ortho_bases(xdata1::Vector{T}, Sigma1::Matrix{T}, xdata2::Vector{T}, Sigma2::Matrix{T}, coeffs::Vector{T}, bf1=Polynomial(), bf2=Polynomial()) where T
+    
+    ndata = length(xdata1)
+    ( length(coeffs) != size(Sigma1,1)*size(Sigma2,1) ) && ( error("DimensionError: length of coeffs and library terms must match") ) 
+
+    Θ1 = gen_ortho_bases(xdata1, Sigma1, bf1)
+    Θ2 = gen_ortho_bases(xdata2, Sigma2, bf2)
+
+    ff = zeros(length(xdata2), length(xdata1));
+
+    for i1 = 1:length(xdata1)
+        for i2 = 1:length(xdata2)
+            ff[i2, i1] = mydot( ( Θ1[i1, :] * Θ2[i2, :]' )[:] , coeffs )
+        end
+    end
+    
+    return ff
+end
+
+
+
+# 23-09-27 addition
+function mydot_ele!(v0, v1)
+    @inbounds@fastmath for i in eachindex(v1)
+        v0[i] *= v1[i]
+    end
+    nothing
+end
+
+
+function mgs_gen_bases(xdata_vec::Vector{Vector{T}}, nmax_vec::Vector{Int}, 
+                       bf_vec=repeat([Polynomial()],length(nmax_vec)), 
+                       params_vec::Vector{T}=ones(T, length(nmax_vec))) where T
+    
+    # modified gram schmidt
+    # multiple input
+
+    ( length( unique( length.(xdata_vec) ) ) != 1 ) && (error("DimensionError: input trajectories must have the same length"))
+    M = length(xdata_vec)
+    ( length(nmax_vec) != M ) && (error("DimensionError: nmax must have the same length as xdata"))
+    ( length(bf_vec) != M ) && (error("DimensionError: basis functions must have the same length as xdata"))
+    ( length(params_vec) != M ) && (error("DimensionError: parameters must have the same length as xdata"))
+    
+    
+    Theta_all = Vector{Matrix{T}}(undef, length(nmax_vec))
+    Sigma_all = Vector{Matrix{T}}(undef, length(nmax_vec))
+
+    for i = 1:length(nmax_vec)
+        Theta_i , Sigma_i = mgs_gen_bases(xdata_vec[i], nmax_vec[i], bf_vec[i], params_vec[i]);
+        Theta_all[i] = Theta_i
+        Sigma_all[i] = Sigma_i
+    end
+    
+    ndata = length(xdata_vec[1])    
+    library_matrix = zeros(T, ndata, prod(size.(Theta_all, 2)) )
+    col_to_indices = findall( ones(size.(Theta_all, 2)...) .> 0)
+
+    tmp_vec = ones(ndata);
+    for col in axes(library_matrix, 2)
+        fill!(tmp_vec, 1.0)
+        for k = 1:M
+            mydot_ele!(tmp_vec, @view(Theta_all[k][:,col_to_indices[col][k]]))
+        end
+        copy!( @view(library_matrix[:, col]),
+               tmp_vec
+            )
+    end
+
+    return library_matrix, Sigma_all
+    
+end
+
+
+function mgs_gen_bases(xdata::Vector{T}, nmax::Int, bf=Polynomial(), params::T=one(T)) where T
+    
+    # modified gram schmidt
+    
+    ndata = length(xdata)
+    library_matrix = zeros(T, ndata, nmax+1)
+    u_this = zeros(T, ndata)
+    u_before = zeros(T, ndata)
+    
+    coeffs_matrix = T.(Matrix(I, nmax+1, nmax+1))
+    # library_matrix[:,1] .= one(T)
+    # (nmax==0) && (return library_matrix)
+    
+    for n in 0:nmax
+        # initiallize 
+        copy!(@view(library_matrix[:,n+1]), bf.(n, xdata, params))
+    end
+    
+    for k in 1:nmax 
+        # remove from k ~ nmax th vector 
+        # the projection from the contribution from k-1 th vector
+        copy!(u_before, @view(library_matrix[:, k]) )
+        
+        for m = k:nmax
+            copy!(u_this, @view(library_matrix[:, m+1]))
+            dot_m_k = dot(u_this, u_before)/ndata;
+            coeffs_matrix[m+1,k] = dot_m_k;
+            u_this .-= dot_m_k .* u_before
+            copy!(@view(library_matrix[:, m+1]), u_this)
+        end
+
+        copy!(u_this, @view(library_matrix[:, k+1]))
+        norm_k = sqrt(dot(u_this,u_this)/ndata)
+        u_this ./= norm_k
+        coeffs_matrix[k+1,k+1] = 1/norm_k;
+        copy!(@view(library_matrix[:, k+1]), u_this)
+        
+    end
+    
+    return library_matrix, coeffs_matrix
+
+end
+
+
+function mgs_gen_bases(xdata::Vector{T}, Sigma::Matrix{T}, bf=Polynomial(), params::T=one(T)) where T
+    
+    # modified gram schmidt
+    nmax = size(Sigma, 1) - 1;
+    ndata = length(xdata)
+    library_matrix = zeros(T, ndata, nmax+1)
+    u_this = zeros(T, ndata)
+    u_before = zeros(T, ndata)
+        
+    for n in 0:nmax
+        # initiallize 
+        copy!(@view(library_matrix[:,n+1]), bf.(n, xdata, params))
+    end
+    
+    for k in 1:nmax 
+        # remove from k ~ nmax th vector 
+        # the projection from the contribution from k-1 th vector
+        copy!(u_before, @view(library_matrix[:, k]) )
+        
+        for m = k:nmax
+            copy!(u_this, @view(library_matrix[:, m+1]))
+            dot_m_k = Sigma[m+1,k];
+            u_this .-= dot_m_k .* u_before
+            copy!(@view(library_matrix[:, m+1]), u_this)
+        end
+
+        copy!(u_this, @view(library_matrix[:, k+1]))
+        u_this .*= Sigma[k+1, k+1]
+        copy!(@view(library_matrix[:, k+1]), u_this)
+        
+    end
+    
+    return library_matrix
+
+end
+
+
+function mgs_rec_bases(xdata_vec::Vector{Vector{T}}, Sigma_vec::Vector{Matrix{T}}, 
+                       bf_vec=repeat([Polynomial()],length(Sigma_vec)), 
+                       params_vec::Vector{T}=ones(T, length(Sigma_vec))) where T
+    
+    # modified gram schmidt
+    # multiple input
+
+    # ( length( unique( length.(xdata_vec) ) ) != 1 ) && (error("DimensionError: input trajectories must have the same length"))
+    M = length(xdata_vec)
+    ( length(Sigma_vec) != M ) && (error("DimensionError: Sigma must have the same length as xdata"))
+    ( length(bf_vec) != M ) && (error("DimensionError: basis functions must have the same length as xdata"))
+    ( length(params_vec) != M ) && (error("DimensionError: parameters must have the same length as xdata"))
+    
+    
+    Theta_all = Vector{Matrix{T}}(undef, length(Sigma_vec))
+    
+    for i = 1:length(Sigma_vec)
+        Theta_i = mgs_gen_bases(xdata_vec[i], Sigma_vec[i], bf_vec[i], params_vec[i]);
+        Theta_all[i] = Theta_i
+    end
+    
+    return Theta_all
+    
+end
+
+
+function mgs_rec_bases(xdata_vec::Vector{Vector{T}}, Sigma_vec::Vector{Matrix{T}}, coeffs::Vector{T},
+                       bf_vec=repeat([Polynomial()],length(Sigma_vec)), 
+                       params_vec::Vector{T}=ones(T, length(Sigma_vec))) where T
+    
+    Theta_all = mgs_rec_bases(xdata_vec, Sigma_vec, 
+                              bf_vec, params_vec);
+
+    ff = zeros(T, size.(xdata_vec, 1)...);
+    ii_map = findall(ff .< 1);
+    col_to_indices = findall( ones(size.(Theta_all, 2)...) .> 0)
+    @assert length(col_to_indices) == length(coeffs)
+    
+    for i = 1:length(ii_map)
+        # each point
+        s = zero(T)
+        for col = 1:length(col_to_indices)
+            # product of theta
+            q = one(T)
+            for k = 1:length(Theta_all)
+                q *= Theta_all[k][ii_map[i][k], col_to_indices[col][k]]
+            end
+            s += q*coeffs[col]
+        end
+
+        ff[ii_map[i]] = s
+        
+    end
+    
+    return ff
+    
+end
+
+
+function mgs_rec_bases(xdata::Vector{T}, Sigma::Matrix{T}, coeffs::Vector{T}, bf=Polynomial(), params::T=one(T)) where T
+    
+    # modified gram schmidt
+    nmax = size(Sigma, 1) - 1;
+    ndata = length(xdata)
+    library_matrix = zeros(T, ndata, nmax+1)
+    u_this = zeros(T, ndata)
+    u_before = zeros(T, ndata)
+        
+    for n in 0:nmax
+        # initiallize 
+        copy!(@view(library_matrix[:,n+1]), bf.(n, xdata, params))
+    end
+    
+    for k in 1:nmax 
+        # remove from k ~ nmax th vector 
+        # the projection from the contribution from k-1 th vector
+        copy!(u_before, @view(library_matrix[:, k]) )
+        
+        for m = k:nmax
+            copy!(u_this, @view(library_matrix[:, m+1]))
+            dot_m_k = Sigma[m+1,k];
+            u_this .-= dot_m_k .* u_before
+            copy!(@view(library_matrix[:, m+1]), u_this)
+        end
+
+        copy!(u_this, @view(library_matrix[:, k+1]))
+        u_this .*= Sigma[k+1, k+1]
+        copy!(@view(library_matrix[:, k+1]), u_this)
+        
+    end
+
+    ff = zeros(T, ndata)
+    for i in eachindex(coeffs)
+        ff .+= coeffs[i] .* @view(library_matrix[:,i])
+    end
+    
+    return ff
+
+end
+
+struct sChebyshevT{T} <: InteractionBasis end
+(basis::sChebyshevT{T})(n::Int, x) where T = ChebyshevT{T}()(n, x)
+(basis::sChebyshevT{T})(n::Int, x, p)  where T = ChebyshevT{T}()(n, x/p-1)
